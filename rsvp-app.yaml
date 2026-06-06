@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rsvp-app
+spec:
+  containers:
+  - name: rsvp-app
+    image: rsvp-flask-app:01
+    imagePullPolicy: Never
+    ports:
+    - containerPort: 5000
