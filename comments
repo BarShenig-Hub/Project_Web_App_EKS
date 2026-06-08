@@ -4,3 +4,21 @@
 # Add a value with variables file
 ### The URL is't temprary ###
 app.py > line 8
+
+
+
+Go to AWS Console → Secrets Manager → Secrets
+Find rsvp/admin_credentials (created by Terraform)
+Click it → Retrieve secret value → Edit
+Choose Plaintext and enter a JSON object:
+
+{
+  "username": "admin",
+  "password": "----",
+  "flask_secret_key": "ac7577c433c845a33f65153e2ada6da6cf44ee71557cfc83db11ab930646461f",
+  "cognito_client_secret": "----",
+  "ngrok_authtoken": "-----"
+}
+
+
+"cognito_client_secret": "----",  ### Amazon Cognito> User pools > rsvp-admin-pool > App clients > App client: rsvp-flask-client

@@ -4,13 +4,17 @@ import io
 import re
 import uuid
 import boto3
+from functools import wraps
 
-from flask import Flask, render_template, request, redirect, url_for, Response, jsonify
+from flask import Flask, render_template, request, redirect, url_for, Response, jsonify, session
+from authlib.integrations.flask_client import OAuth
 from botocore.exceptions import ClientError
 from boto3.dynamodb.conditions import Attr
 
 
 app = Flask(__name__)
+
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(24))
 
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 COUPLES_TABLE_NAME = os.environ.get("COUPLES_TABLE", "RSVP_Couples")
@@ -19,6 +23,60 @@ RSVP_TABLE_NAME = os.environ.get("RSVP_TABLE", "RSVP_Responses")
 dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 couples_table = dynamodb.Table(COUPLES_TABLE_NAME)
 rsvp_table = dynamodb.Table(RSVP_TABLE_NAME)
+
+COGNITO_USER_POOL_ID  = os.environ.get("COGNITO_USER_POOL_ID")
+COGNITO_CLIENT_ID     = os.environ.get("COGNITO_CLIENT_ID")
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
+COGNITO_CLIENT_SECRET = os.environ.get("COGNITO_CLIENT_SECRET")
+COGNITO_DOMAIN        = os.environ.get("COGNITO_DOMAIN")
+APP_BASE_URL          = os.environ.get("APP_BASE_URL", "http://localhost:5000")
+
+oauth = OAuth(app)
+oauth.register(
+    name="oidc",
+    authority=f"https://cognito-idp.{AWS_REGION}.amazonaws.com/{COGNITO_USER_POOL_ID}",
+    client_id=COGNITO_CLIENT_ID,
+    client_secret=COGNITO_CLIENT_SECRET,
+    server_metadata_url=(
+        f"https://cognito-idp.{AWS_REGION}.amazonaws.com"
+        f"/{COGNITO_USER_POOL_ID}/.well-known/openid-configuration"
+    ),
+    client_kwargs={"scope": "openid email"},
+)
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if "user" not in session:
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated
+
+
+@app.route("/login")
+def login():
+    redirect_uri = f"{APP_BASE_URL}/authorize"
+    return oauth.oidc.authorize_redirect(redirect_uri)
+
+
+@app.route("/authorize")
+def authorize():
+    token = oauth.oidc.authorize_access_token()
+    session["user"] = token["userinfo"]
+    return redirect(url_for("admin"))
+
+
+@app.route("/logout")
+def logout():
+    session.pop("user", None)
+    # Also sign out from Cognito's hosted UI so the browser session is cleared
+    logout_url = (
+        f"{COGNITO_DOMAIN}/logout"
+        f"?client_id={COGNITO_CLIENT_ID}"
+        f"&logout_uri={APP_BASE_URL}/login"
+    )
+    return redirect(logout_url)
 
 
 def make_couple_id(groom_name, bride_name):
@@ -34,6 +92,7 @@ def root():
 
 
 @app.route("/admin")
+@login_required
 def admin():
     try:
         response = couples_table.scan()
@@ -48,6 +107,7 @@ def admin():
 
 
 @app.route("/admin/create-couple", methods=["POST"])
+@login_required
 def create_couple():
     groom_name = request.form.get("groom_name", "").strip()
     bride_name = request.form.get("bride_name", "").strip()
